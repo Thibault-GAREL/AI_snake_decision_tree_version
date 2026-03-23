@@ -283,6 +283,36 @@ def distance_food_north_west (my_snake, food):
             distance = ((my_snake.list_snake[0].x - food.x) ** 2 + (my_snake.list_snake[0].y - food.y) ** 2) ** 0.5
     return distance
 
+# ── Features enrichies : danger binaire (1 pas devant) ───────────────────────
+
+def danger_north(my_snake):
+    new_x = my_snake.list_snake[0].x
+    new_y = my_snake.list_snake[0].y - rect_height
+    if not (0 <= new_x < width and 0 <= new_y < height):
+        return 1.0
+    return 1.0 if Snake(new_x, new_y) in my_snake.list_snake else 0.0
+
+def danger_east(my_snake):
+    new_x = my_snake.list_snake[0].x + rect_width
+    new_y = my_snake.list_snake[0].y
+    if not (0 <= new_x < width and 0 <= new_y < height):
+        return 1.0
+    return 1.0 if Snake(new_x, new_y) in my_snake.list_snake else 0.0
+
+def danger_south(my_snake):
+    new_x = my_snake.list_snake[0].x
+    new_y = my_snake.list_snake[0].y + rect_height
+    if not (0 <= new_x < width and 0 <= new_y < height):
+        return 1.0
+    return 1.0 if Snake(new_x, new_y) in my_snake.list_snake else 0.0
+
+def danger_west(my_snake):
+    new_x = my_snake.list_snake[0].x - rect_width
+    new_y = my_snake.list_snake[0].y
+    if not (0 <= new_x < width and 0 <= new_y < height):
+        return 1.0
+    return 1.0 if Snake(new_x, new_y) in my_snake.list_snake else 0.0
+
 def print_display(msg, color, position):
     txt = fonttype.render(msg, True, color)
     rect_text = txt.get_rect(**position)
@@ -345,6 +375,19 @@ def game_loop(rect_width, rect_height, display, net, genome, i, Neat):
         if show:
             display.fill(BLACK)
 
+        # Features enrichies : delta food normalisé + danger binaire + direction one-hot
+        _head = my_snake.list_snake[0]
+        _food_dx   = (food_actuel.x - _head.x) / width
+        _food_dy   = (food_actuel.y - _head.y) / height
+        _d_north   = danger_north(my_snake)
+        _d_east    = danger_east(my_snake)
+        _d_south   = danger_south(my_snake)
+        _d_west    = danger_west(my_snake)
+        _dir_up    = 1.0 if my_snake.direction == "UP"    else 0.0
+        _dir_right = 1.0 if my_snake.direction == "RIGHT" else 0.0
+        _dir_down  = 1.0 if my_snake.direction == "DOWN"  else 0.0
+        _dir_left  = 1.0 if my_snake.direction == "LEFT"  else 0.0
+
         state = Neat.tab_state(distance_bord_north(my_snake), distance_bord_north_est(my_snake),
                  distance_bord_est(my_snake), distance_bord_south_est(my_snake),
                  distance_bord_south(my_snake), distance_bord_south_west(my_snake),
@@ -353,7 +396,11 @@ def game_loop(rect_width, rect_height, display, net, genome, i, Neat):
                  distance_food_north(my_snake, food_actuel), distance_food_north_est(my_snake, food_actuel),
                  distance_food_est(my_snake, food_actuel), distance_food_south_est(my_snake, food_actuel),
                  distance_food_south(my_snake, food_actuel), distance_food_south_west(my_snake, food_actuel),
-                 distance_food_west(my_snake, food_actuel), distance_food_north_west(my_snake, food_actuel))
+                 distance_food_west(my_snake, food_actuel), distance_food_north_west(my_snake, food_actuel),
+
+                 _food_dx, _food_dy,
+                 _d_north, _d_east, _d_south, _d_west,
+                 _dir_up, _dir_right, _dir_down, _dir_left)
 
 
         # print(state)
@@ -448,6 +495,9 @@ def game_loop(rect_width, rect_height, display, net, genome, i, Neat):
             print_display(f"Score : {score}", WHITE, {'topleft': (10, 10)})
             # print(f"lenght : {my_snake.lenght}")
 
+        _nh = my_snake.list_snake[0]
+        _nfdx = (food_actuel.x - _nh.x) / width
+        _nfdy = (food_actuel.y - _nh.y) / height
         next_state = [distance_bord_north(my_snake), distance_bord_north_est(my_snake),
              distance_bord_est(my_snake), distance_bord_south_est(my_snake),
              distance_bord_south(my_snake), distance_bord_south_west(my_snake),
@@ -456,7 +506,14 @@ def game_loop(rect_width, rect_height, display, net, genome, i, Neat):
              distance_food_north(my_snake, food_actuel), distance_food_north_est(my_snake, food_actuel),
              distance_food_est(my_snake, food_actuel), distance_food_south_est(my_snake, food_actuel),
              distance_food_south(my_snake, food_actuel), distance_food_south_west(my_snake, food_actuel),
-             distance_food_west(my_snake, food_actuel), distance_food_north_west(my_snake, food_actuel)]
+             distance_food_west(my_snake, food_actuel), distance_food_north_west(my_snake, food_actuel),
+
+             _nfdx, _nfdy,
+             danger_north(my_snake), danger_east(my_snake), danger_south(my_snake), danger_west(my_snake),
+             1.0 if my_snake.direction == "UP" else 0.0,
+             1.0 if my_snake.direction == "RIGHT" else 0.0,
+             1.0 if my_snake.direction == "DOWN" else 0.0,
+             1.0 if my_snake.direction == "LEFT" else 0.0]
 
 
 

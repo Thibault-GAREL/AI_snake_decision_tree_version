@@ -53,7 +53,7 @@ warnings.filterwarnings("ignore")
 # ─────────────────────────────────────────────────────────────────────────────
 # Constantes
 # ─────────────────────────────────────────────────────────────────────────────
-N_FEATURES      = 16
+N_FEATURES      = 26   # 16 dist + 2 food_delta + 4 danger_bin + 4 dir_one_hot
 N_ACTIONS       = 4
 ACTION_NAMES    = {0: "UP", 1: "RIGHT", 2: "DOWN", 3: "LEFT"}
 DIRECTION_MAP   = {"UP": 0, "RIGHT": 1, "DOWN": 2, "LEFT": 3}
@@ -181,58 +181,91 @@ class GreedyOracle:
 
     def get_action(self, state: List[float]) -> int:
         """
-        state[0..7]  : distances bord (N NE E SE S SW W NW)
-        state[8..15] : distances nourriture (N NE E SE S SW W NW)
+        state[0..7]  : distances obstacle (N NE E SE S SW W NW)
+        state[8..15] : distances nourriture alignée (N NE E SE S SW W NW)
+        state[16]    : food_delta_x normalisé  (+= nourriture à droite)
+        state[17]    : food_delta_y normalisé  (+= nourriture en bas)
+        state[18..21]: danger binaire immédiat (N E S W)
+        state[22..25]: direction courante one-hot (UP RIGHT DOWN LEFT)
         """
-        s = state
-        # Distances bord dans chaque direction cardinale
-        danger_up    = s[0]  # distance bord nord
-        danger_right = s[2]  # distance bord est
-        danger_down  = s[4]  # distance bord sud
-        danger_left  = s[6]  # distance bord ouest
-
-        # Nourriture visible
-        food_up    = s[8]
-        food_right = s[10]
-        food_down  = s[12]
-        food_left  = s[14]
-
         current_dir = DIRECTION_MAP.get(self.direction, 1)
 
-        # Priorité : aller vers la nourriture si la voie est libre (>50 pixels)
-        SAFE_DIST = 50  # au moins une case libre
+        if len(state) >= 26:
+            # ── Oracle enrichi (features v2) ──────────────────────────────
+            food_dx     = state[16]   # >0 → nourriture à droite
+            food_dy     = state[17]   # >0 → nourriture en bas
+            d_north     = state[18]
+            d_east      = state[19]
+            d_south     = state[20]
+            d_west      = state[21]
+            safe = {0: not d_north, 1: not d_east, 2: not d_south, 3: not d_west}
 
-        candidates = []
-        if food_up    > 0 and danger_up    > SAFE_DIST:
-            candidates.append((0, food_up))
-        if food_right > 0 and danger_right > SAFE_DIST:
-            candidates.append((1, food_right))
-        if food_down  > 0 and danger_down  > SAFE_DIST:
-            candidates.append((2, food_down))
-        if food_left  > 0 and danger_left  > SAFE_DIST:
-            candidates.append((3, food_left))
+            # Candidats vers la nourriture (on exclut direction opposée)
+            candidates = []
+            if food_dy < -0.01 and safe[0]:
+                candidates.append((0, abs(food_dy)))
+            if food_dx > 0.01  and safe[1]:
+                candidates.append((1, abs(food_dx)))
+            if food_dy > 0.01  and safe[2]:
+                candidates.append((2, abs(food_dy)))
+            if food_dx < -0.01 and safe[3]:
+                candidates.append((3, abs(food_dx)))
 
-        if candidates:
-            # On prend la direction vers la nourriture la plus proche
-            best = max(candidates, key=lambda x: x[1])
-            action = best[0]
-            if action != OPPOSITE[current_dir]:
-                return action
+            # Filtrer la direction opposée
+            candidates = [(a, d) for a, d in candidates
+                          if a != OPPOSITE[current_dir]]
 
-        # Sinon : continuer tout droit si safe, sinon tourner vers la plus grande distance
-        safe_actions = []
-        for a, dist in [(0, danger_up), (1, danger_right),
-                        (2, danger_down), (3, danger_left)]:
-            if a != OPPOSITE[current_dir] and dist > SAFE_DIST:
-                safe_actions.append((a, dist))
+            if candidates:
+                return max(candidates, key=lambda x: x[1])[0]
 
-        if safe_actions:
-            # Préférer continuer tout droit
-            straight = [x for x in safe_actions if x[0] == current_dir]
-            if straight:
-                return straight[0][0]
-            # Sinon la direction la plus dégagée
-            return max(safe_actions, key=lambda x: x[1])[0]
+            # Fallback : direction sûre non-opposée (préférer tout droit)
+            safe_actions = [a for a in range(4)
+                            if safe[a] and a != OPPOSITE[current_dir]]
+            if current_dir in safe_actions:
+                return current_dir
+            if safe_actions:
+                # Préférer la direction la plus dégagée (distance obstacle max)
+                dist_map = {0: state[0], 1: state[2], 2: state[4], 3: state[6]}
+                return max(safe_actions, key=lambda a: dist_map[a])
+
+        else:
+            # ── Oracle legacy (features v1, 16 features) ──────────────────
+            SAFE_DIST = 50
+            danger_up    = state[0]
+            danger_right = state[2]
+            danger_down  = state[4]
+            danger_left  = state[6]
+            food_up    = state[8]
+            food_right = state[10]
+            food_down  = state[12]
+            food_left  = state[14]
+
+            candidates = []
+            if food_up    > 0 and danger_up    > SAFE_DIST:
+                candidates.append((0, food_up))
+            if food_right > 0 and danger_right > SAFE_DIST:
+                candidates.append((1, food_right))
+            if food_down  > 0 and danger_down  > SAFE_DIST:
+                candidates.append((2, food_down))
+            if food_left  > 0 and danger_left  > SAFE_DIST:
+                candidates.append((3, food_left))
+
+            if candidates:
+                best = max(candidates, key=lambda x: x[1])
+                if best[0] != OPPOSITE[current_dir]:
+                    return best[0]
+
+            safe_actions = []
+            for a, dist in [(0, danger_up), (1, danger_right),
+                            (2, danger_down), (3, danger_left)]:
+                if a != OPPOSITE[current_dir] and dist > SAFE_DIST:
+                    safe_actions.append((a, dist))
+
+            if safe_actions:
+                straight = [x for x in safe_actions if x[0] == current_dir]
+                if straight:
+                    return straight[0][0]
+                return max(safe_actions, key=lambda x: x[1])[0]
 
         # Dernier recours : action aléatoire non-suicide
         non_opposite = [a for a in range(4) if a != OPPOSITE[current_dir]]
@@ -440,6 +473,13 @@ class DecisionTreeAgent:
 
         if os.path.exists(bp):
             self.buffer.load(bp)
+            # Validation : si les features du buffer ne correspondent plus, reset
+            if len(self.buffer) > 0 and len(self.buffer.states[0]) != N_FEATURES:
+                print(f"[Load] Feature mismatch : buffer={len(self.buffer.states[0])} "
+                      f"vs attendu={N_FEATURES}. Reset buffer et modele.")
+                self.buffer  = ReplayBuffer(max_size=300_000)
+                self.trained = False
+                self.model   = None
 
     # ── Statistiques ──────────────────────────────────────────────────────
     def stats(self):

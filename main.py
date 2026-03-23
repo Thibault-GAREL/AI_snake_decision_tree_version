@@ -40,14 +40,14 @@ from arbre_de_decision import (
 # ─────────────────────────────────────────────────────────────────────────────
 
 # ── Phase 1 : collecte oracle ─────────────────────────────────────────────────
-N_ORACLE_GAMES      = 300     # parties jouées par l'heuristique greedy
-ORACLE_MAX_STEPS    = 500     # limite de pas par partie (= stop_iteration)
+N_ORACLE_GAMES      = 500     # parties jouées par l'heuristique greedy
+ORACLE_MAX_STEPS    = 2000    # limite de pas par partie
 
 # ── Phase 2 : entraînement initial ────────────────────────────────────────────
 MIN_BUFFER_FOR_TRAIN = 3_000  # seuil minimal avant d'entraîner
 
 # ── Phase 3 : DAgger ─────────────────────────────────────────────────────────
-N_DAGGER_ROUNDS      = 10     # nombre de rounds DAgger
+N_DAGGER_ROUNDS      = 8      # nombre de rounds DAgger
 N_GAMES_PER_ROUND    = 50     # parties jouées par round par l'agent
 DAGGER_BETA_INIT     = 0.8    # probabilité initiale de suivre l'oracle (vs agent)
 DAGGER_BETA_DECAY    = 0.85   # décroissance de beta par round
@@ -68,8 +68,9 @@ random.seed(RANDOM_SEED)
 np.random.seed(RANDOM_SEED)
 
 # Désactiver l'affichage pygame si on ne veut pas le voir
-snake_env.show   = SHOW_GAME
-snake_env.player = False          # toujours mode IA
+snake_env.show          = SHOW_GAME
+snake_env.player        = False          # toujours mode IA
+snake_env.stop_iteration = ORACLE_MAX_STEPS  # horizon de jeu étendu
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Wrapper game_loop avec collecte de données
@@ -100,11 +101,22 @@ class DataCollectingNeat:
         """
         net est ignoré — on utilise self.agent directement.
         """
-        # Mise à jour de la direction dans l'agent
-        # (snake_env gère la direction en interne, on la lit depuis net qui
-        #  est notre agent)
-        self.agent.set_direction(net.direction if hasattr(net, "direction")
-                                 else self.agent.direction)
+        # Mise à jour de la direction depuis les features d'état (state[22..25])
+        # qui reflètent my_snake.direction côté snake.py.
+        # On NE lit pas net.direction car agent.direction n'est jamais mis à jour
+        # pendant la partie et resterait toujours "RIGHT".
+        if len(state) >= 26:
+            if state[22] > 0.5:
+                self.agent.set_direction("UP")
+            elif state[23] > 0.5:
+                self.agent.set_direction("RIGHT")
+            elif state[24] > 0.5:
+                self.agent.set_direction("DOWN")
+            elif state[25] > 0.5:
+                self.agent.set_direction("LEFT")
+        else:
+            self.agent.set_direction(net.direction if hasattr(net, "direction")
+                                     else self.agent.direction)
 
         # Mode collecte pure : oracle fournit toujours l'action
         if self.collect_mode:
@@ -389,6 +401,7 @@ def train_pipeline():
     # ── Phase 2 : entraînement initial ───────────────────────────────────
     if not agent.trained:
         phase_train(agent)
+        agent.save()   # sauvegarde intermédiaire après Phase 2
     else:
         print("\n[Skip] Modèle déjà entraîné. Passe directement au DAgger.")
 
