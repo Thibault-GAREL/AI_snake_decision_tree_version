@@ -20,7 +20,8 @@ import time
 import random
 import numpy as np
 import matplotlib
-matplotlib.use("Agg")   # rendu sans écran pour les graphiques
+
+matplotlib.use("Agg")  # rendu sans écran pour les graphiques
 import matplotlib.pyplot as plt
 
 # ── Import du moteur snake ────────────────────────────────────────────────────
@@ -40,26 +41,26 @@ from arbre_de_decision import (
 # ─────────────────────────────────────────────────────────────────────────────
 
 # ── Phase 1 : collecte oracle ─────────────────────────────────────────────────
-N_ORACLE_GAMES      = 500     # parties jouées par l'heuristique greedy
-ORACLE_MAX_STEPS    = 2000    # limite de pas par partie
+N_ORACLE_GAMES = 500  # parties jouées par l'heuristique greedy
+ORACLE_MAX_STEPS = 2000  # limite de pas par partie
 
 # ── Phase 2 : entraînement initial ────────────────────────────────────────────
 MIN_BUFFER_FOR_TRAIN = 3_000  # seuil minimal avant d'entraîner
 
 # ── Phase 3 : DAgger ─────────────────────────────────────────────────────────
-N_DAGGER_ROUNDS      = 8      # nombre de rounds DAgger
-N_GAMES_PER_ROUND    = 50     # parties jouées par round par l'agent
-DAGGER_BETA_INIT     = 0.8    # probabilité initiale de suivre l'oracle (vs agent)
-DAGGER_BETA_DECAY    = 0.85   # décroissance de beta par round
-RETRAIN_EVERY        = 2      # ré-entraîner tous les N rounds DAgger
+N_DAGGER_ROUNDS = 8  # nombre de rounds DAgger
+N_GAMES_PER_ROUND = 50  # parties jouées par round par l'agent
+DAGGER_BETA_INIT = 0.8  # probabilité initiale de suivre l'oracle (vs agent)
+DAGGER_BETA_DECAY = 0.85  # décroissance de beta par round
+RETRAIN_EVERY = 2  # ré-entraîner tous les N rounds DAgger
 
 # ── Phase 4 : évaluation ─────────────────────────────────────────────────────
-N_EVAL_GAMES         = 100    # parties pour évaluation finale
+N_EVAL_GAMES = 100  # parties pour évaluation finale
 
 # ── Général ───────────────────────────────────────────────────────────────────
-SHOW_GAME            = False   # afficher pygame pendant l'entraînement ?
-SAVE_PLOTS           = True    # sauvegarder les courbes d'apprentissage
-RANDOM_SEED          = 42
+SHOW_GAME = False  # afficher pygame pendant l'entraînement ?
+SAVE_PLOTS = True  # sauvegarder les courbes d'apprentissage
+RANDOM_SEED = 42
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Initialisation
@@ -68,31 +69,33 @@ random.seed(RANDOM_SEED)
 np.random.seed(RANDOM_SEED)
 
 # Désactiver l'affichage pygame si on ne veut pas le voir
-snake_env.show          = SHOW_GAME
-snake_env.player        = False          # toujours mode IA
+snake_env.show = SHOW_GAME
+snake_env.player = False  # toujours mode IA
 snake_env.stop_iteration = ORACLE_MAX_STEPS  # horizon de jeu étendu
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Wrapper game_loop avec collecte de données
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class DataCollectingNeat:
     """
     Remplace l'objet Neat dans snake.py pour collecter (state, action)
     à chaque pas de jeu.
     """
-    def __init__(self, agent: DecisionTreeAgent,
-                 collect_mode: bool = False,
-                 beta: float = 0.0):
+
+    def __init__(
+        self, agent: DecisionTreeAgent, collect_mode: bool = False, beta: float = 0.0
+    ):
         """
         agent       : l'agent DecisionTreeAgent
         collect_mode: si True, l'oracle fournit les actions (phase collecte)
         beta        : proba d'utiliser l'oracle au lieu de l'agent (DAgger)
         """
-        self.agent        = agent
+        self.agent = agent
         self.collect_mode = collect_mode
-        self.beta         = beta
-        self.trajectory: list = []   # liste de (state, action, oracle_action)
+        self.beta = beta
+        self.trajectory: list = []  # liste de (state, action, oracle_action)
 
     def tab_state(self, *args) -> list:
         return list(args)
@@ -115,8 +118,9 @@ class DataCollectingNeat:
             elif state[25] > 0.5:
                 self.agent.set_direction("LEFT")
         else:
-            self.agent.set_direction(net.direction if hasattr(net, "direction")
-                                     else self.agent.direction)
+            self.agent.set_direction(
+                net.direction if hasattr(net, "direction") else self.agent.direction
+            )
 
         # Mode collecte pure : oracle fournit toujours l'action
         if self.collect_mode:
@@ -137,8 +141,7 @@ class DataCollectingNeat:
         return action
 
 
-def run_game(neat_wrapper: DataCollectingNeat,
-             agent: DecisionTreeAgent) -> int:
+def run_game(neat_wrapper: DataCollectingNeat, agent: DecisionTreeAgent) -> int:
     """
     Lance une partie de snake et retourne le score.
     Utilise le wrapper DataCollectingNeat comme 'Neat'.
@@ -150,10 +153,10 @@ def run_game(neat_wrapper: DataCollectingNeat,
         snake_env.rect_width,
         snake_env.rect_height,
         snake_env.display,
-        agent,          # net  → utilisé pour lire agent.direction
-        None,           # genome → non utilisé dans notre cas
-        0,              # i → non utilisé
-        neat_wrapper,   # Neat → notre wrapper
+        agent,  # net  → utilisé pour lire agent.direction
+        None,  # genome → non utilisé dans notre cas
+        0,  # i → non utilisé
+        neat_wrapper,  # Neat → notre wrapper
     )
     return score
 
@@ -162,8 +165,8 @@ def run_game(neat_wrapper: DataCollectingNeat,
 # Phase 1 — Collecte oracle
 # ─────────────────────────────────────────────────────────────────────────────
 
-def phase_oracle(agent: DecisionTreeAgent,
-                 n_games: int = N_ORACLE_GAMES) -> list:
+
+def phase_oracle(agent: DecisionTreeAgent, n_games: int = N_ORACLE_GAMES) -> list:
     """
     Fait jouer l'oracle greedy pendant n_games parties.
     Retourne la liste des scores obtenus.
@@ -172,9 +175,9 @@ def phase_oracle(agent: DecisionTreeAgent,
     print(f"  PHASE 1 — Collecte oracle ({n_games} parties)")
     print(f"{'='*60}")
 
-    scores  = []
+    scores = []
     wrapper = DataCollectingNeat(agent, collect_mode=True, beta=1.0)
-    t0      = time.time()
+    t0 = time.time()
 
     for i in range(n_games):
         agent.direction = "RIGHT"
@@ -183,10 +186,12 @@ def phase_oracle(agent: DecisionTreeAgent,
 
         if (i + 1) % 50 == 0:
             elapsed = time.time() - t0
-            print(f"  Partie {i+1:4d}/{n_games}  |  "
-                  f"Score moy : {np.mean(scores[-50:]):.2f}  |  "
-                  f"Buffer : {len(agent.buffer):6d}  |  "
-                  f"Temps : {elapsed:.1f}s")
+            print(
+                f"  Partie {i+1:4d}/{n_games}  |  "
+                f"Score moy : {np.mean(scores[-50:]):.2f}  |  "
+                f"Buffer : {len(agent.buffer):6d}  |  "
+                f"Temps : {elapsed:.1f}s"
+            )
 
     print(f"\n  → Score moyen oracle : {np.mean(scores):.2f} ± {np.std(scores):.2f}")
     print(f"  → Buffer total : {len(agent.buffer)} exemples")
@@ -197,6 +202,7 @@ def phase_oracle(agent: DecisionTreeAgent,
 # Phase 2 — Entraînement initial
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 def phase_train(agent: DecisionTreeAgent) -> float:
     """Entraîne le modèle sur le buffer courant."""
     print(f"\n{'='*60}")
@@ -204,8 +210,10 @@ def phase_train(agent: DecisionTreeAgent) -> float:
     print(f"{'='*60}")
 
     if len(agent.buffer) < MIN_BUFFER_FOR_TRAIN:
-        print(f"  [WARN] Buffer trop petit ({len(agent.buffer)} < "
-              f"{MIN_BUFFER_FOR_TRAIN}). Ajoutez plus de données.")
+        print(
+            f"  [WARN] Buffer trop petit ({len(agent.buffer)} < "
+            f"{MIN_BUFFER_FOR_TRAIN}). Ajoutez plus de données."
+        )
         return 1.0
 
     error = agent.train(verbose=True)
@@ -217,10 +225,13 @@ def phase_train(agent: DecisionTreeAgent) -> float:
 # Phase 3 — DAgger (dataset aggregation)
 # ─────────────────────────────────────────────────────────────────────────────
 
-def phase_dagger(agent: DecisionTreeAgent,
-                 n_rounds: int   = N_DAGGER_ROUNDS,
-                 n_games:  int   = N_GAMES_PER_ROUND,
-                 beta_init: float = DAGGER_BETA_INIT) -> dict:
+
+def phase_dagger(
+    agent: DecisionTreeAgent,
+    n_rounds: int = N_DAGGER_ROUNDS,
+    n_games: int = N_GAMES_PER_ROUND,
+    beta_init: float = DAGGER_BETA_INIT,
+) -> dict:
     """
     DAgger-light :
       - L'agent joue des parties avec un mélange oracle/agent (ratio beta)
@@ -232,7 +243,7 @@ def phase_dagger(agent: DecisionTreeAgent,
     print(f"  PHASE 3 — DAgger ({n_rounds} rounds × {n_games} parties)")
     print(f"{'='*60}")
 
-    beta          = beta_init
+    beta = beta_init
     history_score = {}
     history_error = {}
 
@@ -240,7 +251,7 @@ def phase_dagger(agent: DecisionTreeAgent,
         print(f"\n  ── Round DAgger {rnd}/{n_rounds}  (beta={beta:.3f}) ──")
 
         wrapper = DataCollectingNeat(agent, collect_mode=False, beta=beta)
-        scores  = []
+        scores = []
 
         for i in range(n_games):
             agent.direction = "RIGHT"
@@ -248,9 +259,11 @@ def phase_dagger(agent: DecisionTreeAgent,
             scores.append(score)
 
         mean_score = float(np.mean(scores))
-        max_score  = int(np.max(scores))
-        print(f"    Score moyen : {mean_score:.2f}  |  "
-              f"Max : {max_score}  |  Buffer : {len(agent.buffer)}")
+        max_score = int(np.max(scores))
+        print(
+            f"    Score moyen : {mean_score:.2f}  |  "
+            f"Max : {max_score}  |  Buffer : {len(agent.buffer)}"
+        )
 
         history_score[rnd] = mean_score
 
@@ -259,12 +272,14 @@ def phase_dagger(agent: DecisionTreeAgent,
             print(f"    → Ré-entraînement...")
             error = agent.train(verbose=False)
             history_error[rnd] = error
-            print(f"    → Erreur CV-3 : {error:.4f}  "
-                  f"(Accuracy ≈ {(1-error)*100:.1f}%)")
+            print(
+                f"    → Erreur CV-3 : {error:.4f}  "
+                f"(Accuracy ≈ {(1-error)*100:.1f}%)"
+            )
 
         # Décroissance de beta
         beta *= DAGGER_BETA_DECAY
-        beta  = max(beta, 0.05)   # garder 5% d'oracle minimum
+        beta = max(beta, 0.05)  # garder 5% d'oracle minimum
 
     return {"scores": history_score, "errors": history_error}
 
@@ -273,8 +288,8 @@ def phase_dagger(agent: DecisionTreeAgent,
 # Phase 4 — Évaluation
 # ─────────────────────────────────────────────────────────────────────────────
 
-def phase_eval(agent: DecisionTreeAgent,
-               n_games: int = N_EVAL_GAMES) -> dict:
+
+def phase_eval(agent: DecisionTreeAgent, n_games: int = N_EVAL_GAMES) -> dict:
     """
     Évalue l'agent final sur n_games parties (sans collecte de données).
     """
@@ -284,8 +299,8 @@ def phase_eval(agent: DecisionTreeAgent,
 
     # Wrapper en mode "agent pur" (beta=0, collect_mode=False)
     wrapper = DataCollectingNeat(agent, collect_mode=False, beta=0.0)
-    scores  = []
-    t0      = time.time()
+    scores = []
+    t0 = time.time()
 
     for i in range(n_games):
         agent.direction = "RIGHT"
@@ -293,16 +308,18 @@ def phase_eval(agent: DecisionTreeAgent,
         scores.append(score)
 
         if (i + 1) % 25 == 0:
-            print(f"  Partie {i+1:4d}/{n_games}  |  "
-                  f"Score moy : {np.mean(scores):.2f}  |  "
-                  f"Max : {max(scores)}")
+            print(
+                f"  Partie {i+1:4d}/{n_games}  |  "
+                f"Score moy : {np.mean(scores):.2f}  |  "
+                f"Max : {max(scores)}"
+            )
 
     results = {
-        "scores":  scores,
-        "mean":    float(np.mean(scores)),
-        "std":     float(np.std(scores)),
-        "max":     int(np.max(scores)),
-        "median":  float(np.median(scores)),
+        "scores": scores,
+        "mean": float(np.mean(scores)),
+        "std": float(np.std(scores)),
+        "max": int(np.max(scores)),
+        "median": float(np.median(scores)),
         "elapsed": time.time() - t0,
     }
 
@@ -319,23 +336,33 @@ def phase_eval(agent: DecisionTreeAgent,
 # Visualisation des courbes
 # ─────────────────────────────────────────────────────────────────────────────
 
-def plot_results(oracle_scores: list,
-                 dagger_history: dict,
-                 eval_results: dict,
-                 save_path: str = "snake_training_curves.png"):
+
+def plot_results(
+    oracle_scores: list,
+    dagger_history: dict,
+    eval_results: dict,
+    save_path: str = "snake_training_curves.png",
+):
     """Génère et sauvegarde les courbes d'apprentissage."""
     fig, axes = plt.subplots(1, 3, figsize=(16, 5))
-    fig.suptitle("Snake — Entraînement Arbre de Décision (XGBoost)",
-                 fontsize=14, fontweight="bold")
+    fig.suptitle(
+        "Snake — Entraînement Arbre de Décision (XGBoost)",
+        fontsize=14,
+        fontweight="bold",
+    )
 
     # ── 1. Scores oracle ──────────────────────────────────────────────────
     ax = axes[0]
     window = 20
-    smoothed = np.convolve(oracle_scores,
-                           np.ones(window) / window, mode="valid")
+    smoothed = np.convolve(oracle_scores, np.ones(window) / window, mode="valid")
     ax.plot(oracle_scores, alpha=0.3, color="steelblue", label="Brut")
-    ax.plot(range(window - 1, len(oracle_scores)),
-            smoothed, color="steelblue", linewidth=2, label=f"Moyenne {window}")
+    ax.plot(
+        range(window - 1, len(oracle_scores)),
+        smoothed,
+        color="steelblue",
+        linewidth=2,
+        label=f"Moyenne {window}",
+    )
     ax.set_title("Phase 1 — Scores Oracle")
     ax.set_xlabel("Partie")
     ax.set_ylabel("Score")
@@ -354,12 +381,21 @@ def plot_results(oracle_scores: list,
 
     # ── 3. Distribution scores finaux ────────────────────────────────────
     ax = axes[2]
-    ax.hist(eval_results["scores"], bins=15, color="seagreen",
-            edgecolor="white", alpha=0.85)
-    ax.axvline(eval_results["mean"],   color="red",    linestyle="--",
-               label=f"Moyenne {eval_results['mean']:.1f}")
-    ax.axvline(eval_results["median"], color="orange", linestyle=":",
-               label=f"Médiane {eval_results['median']:.1f}")
+    ax.hist(
+        eval_results["scores"], bins=15, color="seagreen", edgecolor="white", alpha=0.85
+    )
+    ax.axvline(
+        eval_results["mean"],
+        color="red",
+        linestyle="--",
+        label=f"Moyenne {eval_results['mean']:.1f}",
+    )
+    ax.axvline(
+        eval_results["median"],
+        color="orange",
+        linestyle=":",
+        label=f"Médiane {eval_results['median']:.1f}",
+    )
     ax.set_title("Phase 4 — Distribution Scores Finaux")
     ax.set_xlabel("Score")
     ax.set_ylabel("Fréquence")
@@ -375,6 +411,7 @@ def plot_results(oracle_scores: list,
 # ─────────────────────────────────────────────────────────────────────────────
 # Pipeline complet
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 def train_pipeline():
     """Lance le pipeline complet d'entraînement."""
@@ -394,23 +431,25 @@ def train_pipeline():
     if len(agent.buffer) < MIN_BUFFER_FOR_TRAIN:
         oracle_scores = phase_oracle(agent, n_games=N_ORACLE_GAMES)
     else:
-        print(f"\n[Skip] Buffer déjà riche ({len(agent.buffer)} exemples). "
-              "Phase oracle ignorée.")
+        print(
+            f"\n[Skip] Buffer déjà riche ({len(agent.buffer)} exemples). "
+            "Phase oracle ignorée."
+        )
         oracle_scores = [0]
 
     # ── Phase 2 : entraînement initial ───────────────────────────────────
     if not agent.trained:
         phase_train(agent)
-        agent.save()   # sauvegarde intermédiaire après Phase 2
+        agent.save()  # sauvegarde intermédiaire après Phase 2
     else:
         print("\n[Skip] Modèle déjà entraîné. Passe directement au DAgger.")
 
     # ── Phase 3 : DAgger ─────────────────────────────────────────────────
     dagger_history = phase_dagger(
         agent,
-        n_rounds  = N_DAGGER_ROUNDS,
-        n_games   = N_GAMES_PER_ROUND,
-        beta_init = DAGGER_BETA_INIT,
+        n_rounds=N_DAGGER_ROUNDS,
+        n_games=N_GAMES_PER_ROUND,
+        beta_init=DAGGER_BETA_INIT,
     )
 
     # ── Phase 4 : évaluation ─────────────────────────────────────────────
@@ -436,26 +475,30 @@ def demo_mode(n_games: int = 5):
     agent.load()
 
     if not agent.trained:
-        print("[Demo] Aucun modèle entraîné trouvé. "
-              "Lancez d'abord le mode entraînement.")
+        print(
+            "[Demo] Aucun modèle entraîné trouvé. "
+            "Lancez d'abord le mode entraînement."
+        )
         return
 
     # Activer l'affichage pygame pour la démo
-    snake_env.show   = True
+    snake_env.show = True
     snake_env.player = False
     snake_env.vitesse = 8
 
-    if not hasattr(snake_env, 'clock') or snake_env.display is None:
+    if not hasattr(snake_env, "clock") or snake_env.display is None:
         import pygame
+
         pygame.init()
         snake_env.display = pygame.display.set_mode(
-            (snake_env.width, int(snake_env.height)))
+            (snake_env.width, int(snake_env.height))
+        )
         pygame.display.set_caption("Snake — Agent Arbre de Décision")
-        snake_env.clock    = pygame.time.Clock()
+        snake_env.clock = pygame.time.Clock()
         snake_env.fonttype = pygame.font.SysFont(None, 30)
 
     wrapper = DataCollectingNeat(agent, collect_mode=False, beta=0.0)
-    scores  = []
+    scores = []
 
     print(f"[Demo] Démarrage de {n_games} parties...")
     for i in range(n_games):
