@@ -1,0 +1,294 @@
+# 🌳🐍 Snake AI Using Decision Trees (XGBoost + DAgger)
+
+![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)
+![XGBoost](https://img.shields.io/badge/XGBoost-2.x-orange.svg)
+![CUDA](https://img.shields.io/badge/CUDA-supported-76B900.svg)
+![scikit-learn](https://img.shields.io/badge/scikit--learn-1.4%2B-F7931E.svg)
+![Pygame](https://img.shields.io/badge/Pygame-2.6.1-red.svg)
+![SHAP](https://img.shields.io/badge/SHAP-0.49-purple.svg)
+
+![License](https://img.shields.io/badge/license-MIT-green.svg)
+![Contributions](https://img.shields.io/badge/contributions-welcome-orange.svg)
+
+<p align="center">
+  <img src="img/Snake_arbre_de_decision-Score_31.gif" alt="Gif - Snake Decision Tree AI" width="300">
+</p>
+
+## 📝 Project Description
+
+This project is a **continuation** of my Snake AI series :
+
+- 🎮 The Snake game itself : [snake_game](https://github.com/Thibault-GAREL/snake_game)
+- 🧬 First AI version using NEAT (NeuroEvolution) : [AI_snake_genetic_version](https://github.com/Thibault-GAREL/AI_snake_genetic_version)
+- 🤖 Second AI version using Deep Q-Learning : [AI_snake_DQL](https://github.com/Thibault-GAREL/AI_snake_DQL)
+
+This time, the agent learns to play Snake using **Imitation Learning** with **XGBoost** (boosted decision trees) and GPU/CUDA acceleration. Instead of reinforcement learning, the agent is first trained on demonstrations from a **greedy heuristic oracle**, then refined through **DAgger** (Dataset Aggregation) — mixing oracle and agent actions to iteratively correct distribution shift. 🌳🎯
+
+The project also includes a full **Explainable AI (XAI)** suite to understand what the boosted tree ensemble has learned, with dedicated scripts mirroring the analysis done on the DQL version.
+
+---
+
+## ⚙️ Features
+
+  🌳 **XGBoost** boosted decision trees with GPU/CUDA acceleration (`tree_method='hist'`)
+
+  🧠 **Greedy oracle** bootstraps the dataset — no random exploration needed
+
+  🔁 **DAgger-light** iterative refinement — beta-weighted mixing of oracle and agent actions
+
+  📦 **Replay buffer** of up to 300k (state, action) pairs for supervised training
+
+  🛡️ **sklearn fallback** — automatic switch to `GradientBoostingClassifier` if no GPU available
+
+  💾 **Auto-save** of model and buffer after each training phase
+
+  🔬 **Full XAI suite** — 4 independent analysis scripts
+
+---
+
+## ⚙️ How it works
+
+  🎮 The AI controls a snake on a 10×14 grid. At each step, it receives a **state vector of 26 features** and predicts one of 4 actions (UP, RIGHT, DOWN, LEFT).
+
+  🤖 **Phase 1 — Oracle** : a greedy heuristic agent plays 500 games and fills the replay buffer with (state, action) pairs.
+
+  🧾 **Phase 2 — Initial training** : XGBoost is trained on the full buffer using multi-class softmax. A 10% validation split with early stopping controls overfitting.
+
+  🔁 **Phase 3 — DAgger** : 8 rounds of mixed-play. The agent plays with probability `1-beta` and the oracle with probability `beta`. Only oracle labels are stored. Beta decays from 0.8 × 0.85^round, keeping 5% oracle minimum.
+
+  📈 **Phase 4 — Evaluation** : pure agent-play over 100 games, no oracle. Final score distribution and mean/max reported.
+
+---
+
+## 🗺️ State vector — 26 input features
+
+<details>
+<summary>📋 See all 26 features</summary>
+
+### Distances to walls / body (8 inputs)
+
+| # | Feature |
+|---|---------|
+| 0 | `distance_bord_N` — Distance to obstacle North |
+| 1 | `distance_bord_NE` — Distance to obstacle North-East |
+| 2 | `distance_bord_E` — Distance to obstacle East |
+| 3 | `distance_bord_SE` — Distance to obstacle South-East |
+| 4 | `distance_bord_S` — Distance to obstacle South |
+| 5 | `distance_bord_SW` — Distance to obstacle South-West |
+| 6 | `distance_bord_W` — Distance to obstacle West |
+| 7 | `distance_bord_NW` — Distance to obstacle North-West |
+
+### Distances to food (8 inputs)
+
+| # | Feature |
+|---|---------|
+| 8  | `distance_food_N` — Distance to food North |
+| 9  | `distance_food_NE` — Distance to food North-East |
+| 10 | `distance_food_E` — Distance to food East |
+| 11 | `distance_food_SE` — Distance to food South-East |
+| 12 | `distance_food_S` — Distance to food South |
+| 13 | `distance_food_SW` — Distance to food South-West |
+| 14 | `distance_food_W` — Distance to food West |
+| 15 | `distance_food_NW` — Distance to food North-West |
+
+### Additional features (10 inputs)
+
+| # | Feature |
+|---|---------|
+| 16 | `food_delta_x` — Normalized horizontal delta to food (+= food to the right) |
+| 17 | `food_delta_y` — Normalized vertical delta to food (+= food below) |
+| 18 | `danger_N` — Immediate danger binary (North) |
+| 19 | `danger_E` — Immediate danger binary (East) |
+| 20 | `danger_S` — Immediate danger binary (South) |
+| 21 | `danger_W` — Immediate danger binary (West) |
+| 22 | `dir_UP` — Current direction one-hot |
+| 23 | `dir_RIGHT` — Current direction one-hot |
+| 24 | `dir_DOWN` — Current direction one-hot |
+| 25 | `dir_LEFT` — Current direction one-hot |
+
+### Output — 4 actions
+
+| # | Action |
+|---|--------|
+| 0 | `UP` |
+| 1 | `RIGHT` |
+| 2 | `DOWN` |
+| 3 | `LEFT` |
+
+</details>
+
+---
+
+## 🔬 Explainable AI (XAI) Suite
+
+Four dedicated scripts analyze the model, mirroring the XAI suite from the DQL version :
+
+| Script | Analysis | Output |
+|--------|----------|--------|
+| `xai_dt_predictions.py` | Probability heatmaps, confidence map, temporal evolution | `xai_dt_predictions/` |
+| `xai_dt_features.py` | Permutation importance, native XGBoost importance, feature-action correlation | `xai_dt_features/` |
+| `xai_dt_internals.py` | Importance distributions, tree specialization, t-SNE / UMAP | `xai_dt_internals/` |
+| `xai_dt_shap.py` | SHAP TreeExplainer — beeswarm, waterfall, force plots, summary heatmap | `xai_dt_shap/` |
+
+<details>
+<summary>📸 Predictions analysis — xai_dt_predictions.py</summary>
+
+Shows **what the model "thinks"** at each cell of the grid. The probability heatmaps reveal which action the model favors per position (food fixed), the confidence map shows where the model is uncertain vs. decisive, and the temporal evolution tracks how action probabilities shift step by step during a real episode — including the moment of death.
+
+#### Probability heatmaps
+![xai_dt_heatmaps](xai_dt_predictions/xai_dt_heatmaps.png)
+
+#### Confidence map & learned policy
+![xai_dt_confidence](xai_dt_predictions/xai_dt_confidence.png)
+
+#### Temporal probability evolution
+![xai_dt_temporal](xai_dt_predictions/xai_dt_temporal.png)
+
+</details>
+
+<details>
+<summary>📸 Feature importance — xai_dt_features.py</summary>
+
+Answers the question : **which features actually matter?** Permutation importance measures the score drop when each feature is shuffled. Native XGBoost importance (gain / weight / cover) reveals which features are most used at split time. The correlation heatmap and sensory profiles show which feature tends to trigger which action.
+
+#### Permutation importance
+![xai_dt_permutation](xai_dt_features/xai_dt_permutation.png)
+
+#### Native XGBoost importance (gain / weight / cover)
+![xai_dt_native](xai_dt_features/xai_dt_native.png)
+
+#### Feature-action correlation
+![xai_dt_correlation](xai_dt_features/xai_dt_correlation.png)
+
+#### Sensory profile per action
+![xai_dt_mean_per_action](xai_dt_features/xai_dt_mean_per_action.png)
+
+</details>
+
+<details>
+<summary>📸 Tree internals — xai_dt_internals.py</summary>
+
+Looks inside the ensemble itself. The importance distributions expose **dead features** (never used in any split — analogue of dead neurons). The specialization plot identifies which features drive decisions in specific game situations (danger, food aligned…). The t-SNE and UMAP projections map the 26-dimensional game states into 2D to reveal clusters of similar situations and how the model separates them.
+
+#### Importance distributions (dead features)
+![xai_dt_importance](xai_dt_internals/xai_dt_importance.png)
+
+#### Feature specialization by game situation
+![xai_dt_specialization](xai_dt_internals/xai_dt_specialization.png)
+
+#### t-SNE projection of game states
+![xai_dt_tsne](xai_dt_internals/xai_dt_tsne.png)
+
+#### UMAP projection
+![xai_dt_umap](xai_dt_internals/xai_dt_umap.png)
+
+</details>
+
+<details>
+<summary>📸 SHAP analysis — xai_dt_shap.py</summary>
+
+Uses **SHAP TreeExplainer** (native to XGBoost — much faster than DeepExplainer) to decompose every prediction into per-feature contributions. The beeswarm gives a global ranking of feature impact across all decisions. The waterfall plots break down one specific decision per game situation. The summary heatmap shows signed SHAP values per feature × action, revealing which features push the model toward or away from each action.
+
+#### Beeswarm plot
+![xai_dt_shap_beeswarm](xai_dt_shap/xai_dt_shap_beeswarm.png)
+
+#### Waterfall plots (per game situation)
+![xai_dt_shap_waterfall](xai_dt_shap/xai_dt_shap_waterfall.png)
+
+#### SHAP summary heatmap
+![xai_dt_shap_heatmap](xai_dt_shap/xai_dt_shap_heatmap.png)
+
+</details>
+
+---
+
+## 📂 Repository structure
+
+```bash
+├── img/                            # For the README
+│   └── Snake_arbre_de_decision-Score_31.gif
+│
+├── snake.py                        # Snake game (from snake_game repo)
+├── arbre_de_decision.py            # XGBoost agent, oracle, replay buffer, DAgger
+├── main.py                         # Training pipeline (4 phases)
+│
+├── xai_dt_predictions.py           # XAI — Probability heatmaps & temporal analysis
+├── xai_dt_features.py              # XAI — Feature importance
+├── xai_dt_internals.py             # XAI — Tree structure & state projections
+├── xai_dt_shap.py                  # XAI — SHAP explanations
+│
+├── snake_xgb_model.pkl             # Trained model checkpoint (auto-saved)
+├── snake_replay_buffer.pkl         # Replay buffer (auto-saved)
+├── snake_training_curves.png       # Training curves (auto-generated)
+│
+├── xai_dt_predictions/             # Output plots — Predictions
+├── xai_dt_features/                # Output plots — Feature importance
+├── xai_dt_internals/               # Output plots — Tree internals
+├── xai_dt_shap/                    # Output plots + HTML — SHAP
+│
+├── LICENSE
+└── README.md
+```
+
+---
+
+## 💻 Run it on Your PC
+
+Clone the repository and install dependencies :
+
+```bash
+git clone https://github.com/Thibault-GAREL/AI_snake_decision_tree_version.git
+cd AI_snake_decision_tree_version
+
+python -m venv .venv # if you don't have a virtual environment
+source .venv/bin/activate   # Linux / macOS
+.venv\Scripts\activate      # Windows
+
+pip install pygame numpy matplotlib scipy scikit-learn
+pip install xgboost           # GPU support via CUDA if available
+pip install shap              # for xai_dt_shap.py
+pip install umap-learn        # optional, for xai_dt_internals.py --umap
+```
+
+⚠️ XGBoost will automatically fall back to **CPU mode** if no CUDA-compatible GPU is detected — no manual change needed.
+
+### Train the agent
+
+```bash
+python main.py              # full pipeline (oracle → train → DAgger → eval)
+python main.py demo         # load saved model and play visually (5 games)
+python main.py demo 10      # idem, 10 games
+```
+
+### Run XAI analyses
+
+```bash
+python xai_dt_predictions.py              # all prediction plots
+python xai_dt_features.py                 # all feature importance plots
+python xai_dt_internals.py --tsne         # t-SNE projection
+python xai_dt_internals.py --umap         # UMAP projection
+python xai_dt_shap.py                     # all SHAP plots
+python xai_dt_shap.py --beeswarm          # SHAP beeswarm only
+```
+
+---
+
+## ⚙️ Key Hyperparameters
+
+| Parameter | Value | Description |
+|-----------|-------|-------------|
+| `N_ORACLE_GAMES` | 500 | Games played by the greedy oracle |
+| `N_DAGGER_ROUNDS` | 8 | DAgger refinement rounds |
+| `DAGGER_BETA_INIT` | 0.8 | Initial oracle mixing ratio |
+| `DAGGER_BETA_DECAY` | 0.85 | Beta decay per round |
+| `n_estimators` | 400 | XGBoost boosting rounds |
+| `max_depth` | 8 | Max depth per tree |
+| `learning_rate` | 0.05 | XGBoost eta |
+
+---
+
+## 📖 Inspiration / Sources
+
+I code it without any help 😆 !
+
+Code created by me 😎, Thibault GAREL — [Github](https://github.com/Thibault-GAREL)
