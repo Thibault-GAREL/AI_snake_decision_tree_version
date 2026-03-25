@@ -37,29 +37,100 @@ This is not a neural network — the equivalent of "neurons" here are **decision
 
 ---
 
-## ⏱️ Training Time (estimated)
+## ⏱️ Training Time (measured — MLflow run 2026-03-25, GPU CUDA)
 
 Grid: `800×400 px` — cells `50×50` → **16×8 = 128 cells**.
-No display during training (`SHOW_GAME = False`) → ~0.3–1 ms per game step (pure Python).
+No display during training (`SHOW_GAME = False`).
+MLflow Run ID: `f936e52849d04973abc3026076a7bae0`
 
-| Phase | Steps | GPU (CUDA) | CPU (sklearn fallback) |
-|-------|-------|------------|------------------------|
-| Phase 1 — Oracle | 500 games × ~400 steps avg = ~200k steps | ~2–3 min | ~2–3 min |
-| Phase 2 — Initial training | ~200k samples, 400 rounds, early stop @30 | ~10–20 s | ~3–8 min |
-| Phase 3 — DAgger | 400 games (~160k steps) + 4 retrainings on ~300k samples | ~3–5 min | ~15–25 min |
-| Phase 4 — Evaluation | 100 games × ~300 steps | ~30–60 s | ~30–60 s |
-| **Total** | | **~6–10 min** | **~20–40 min** |
+| Phase | Details | Measured time |
+|-------|---------|---------------|
+| Phase 1 — Oracle | 500 games, buffer: 0 → 119 964 samples | **11.8 s** |
+| Phase 2 — Initial training | 119 964 samples, early stop @380/400 rounds | **~15 s** |
+| Phase 3 — DAgger | 8 rounds × 50 games + 4 retrainings, buffer: 119 964 → 215 576 | **~7 min** |
+| Phase 4 — Evaluation | 100 games (pure agent, beta=0) | **253.4 s (~4.2 min)** |
+| **Total** | | **729.1 s (~12.2 min, GPU)** |
+
+> Note : Phase 3+4 sont plus lentes car chaque pas de l'agent nécessite un appel XGBoost (DMatrix + predict), contrairement à l'oracle qui est du Python pur (~24ms/game oracle vs ~2.5s/game agent).
 
 ---
 
-## 📈 Performance
+## 📈 Performance (MLflow run 2026-03-25, seed 42)
 
-| Metric | Value | Source |
-|--------|-------|--------|
-| **Score max observed** | **31** | Visible in the demo GIF |
-| Score mean (estimated) | 5–15 | Not logged — derived from oracle baseline on 16×8 grid |
-| Oracle greedy baseline | ~8–20 mean | Greedy heuristic with enriched features (danger binary + food delta) |
-| Grid cells | 128 | 16 columns × 8 rows |
+### Environnement
 
-> ⚠️ Mean score is an estimate — no score logging is implemented in the current pipeline.
-> Run `python main.py` and read the Phase 4 output to get the exact value.
+| Library | Version |
+|---------|---------|
+| Python | 3.10.0 |
+| XGBoost | 2.1.4 |
+| scikit-learn | 1.7.2 |
+| NumPy | 1.26.4 |
+| MLflow | 3.10.1 |
+| Backend | XGBoost CUDA |
+
+### Phase 1 — Oracle (500 parties, greedy heuristic)
+
+| Metric | Value |
+|--------|-------|
+| Score moyen oracle | **22.37 ± 6.33** |
+| Score max oracle | **39** |
+| Buffer rempli | **119 964 exemples** |
+| Temps | 11.8 s |
+
+### Phase 2 — Entraînement initial (XGBoost, CUDA)
+
+| Metric | Value |
+|--------|-------|
+| Dataset | 119 964 exemples |
+| Distribution actions | [20 461 UP / 40 581 RIGHT / 19 789 DOWN / 39 133 LEFT] |
+| Early stopping | Round **380 / 400** |
+| Val mlogloss final | **0.00674** |
+| Accuracy CV-3 | **99.7%** (erreur 0.0028) |
+
+### Phase 3 — DAgger (8 rounds × 50 parties)
+
+| Round | Beta | Score moyen | Score max | Buffer | Accuracy CV-3 |
+|-------|------|-------------|-----------|--------|----------------|
+| 1 | 0.800 | 23.68 | 37 | 133 130 | — |
+| 2 | 0.680 | 22.54 | 39 | 145 710 | 99.7% (0.0030) |
+| 3 | 0.578 | 21.12 | 33 | 156 500 | — |
+| 4 | 0.491 | 21.32 | 36 | 167 920 | 99.7% (0.0033) |
+| 5 | 0.418 | 22.80 | 37 | 180 105 | — |
+| 6 | 0.355 | 22.10 | 35 | 191 939 | **99.8%** (0.0024) |
+| 7 | 0.302 | 20.70 | 37 | 202 910 | — |
+| 8 | 0.256 | 23.02 | 35 | 215 576 | 99.7% (0.0027) |
+
+### Phase 4 — Évaluation finale (100 parties, agent pur, beta=0)
+
+| Metric | Value |
+|--------|-------|
+| **Score moyen** | **22.77 ± 7.13** |
+| **Score médian** | **23.0** |
+| **Score max** | **43** |
+| Temps évaluation | 253.4 s |
+| Buffer final | **240 054 exemples** |
+
+### Comparaison oracle / agent
+
+| | Oracle greedy | Agent XGBoost |
+|--|---------------|---------------|
+| Score moyen | 22.37 | **22.77** |
+| Score max | ~39 | **43** |
+| Vitesse | ~24 ms/game | ~2.5 s/game |
+
+> L'agent XGBoost **dépasse l'oracle** en score moyen (22.77 > 22.37) et en score max (43 > 39). Le DAgger a permis à l'élève de surpasser le maître.
+
+---
+
+## 📦 MLflow Tracking
+
+Le pipeline d'entraînement log automatiquement dans MLflow (experiment `snake-decision-tree`) :
+- **Params** : tous les hyperparamètres (XGBoost + pipeline), seed, versions librairies
+- **Metrics** : scores oracle, accuracy CV-3, scores DAgger par round, résultats eval finaux, temps par phase
+- **Artifacts** : `snake_xgb_model.pkl`, `snake_training_curves.png`
+
+Pour visualiser les runs :
+```bash
+cd snake_arbre_de_decision
+mlflow ui --port 5000
+```

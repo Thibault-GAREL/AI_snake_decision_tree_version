@@ -23,6 +23,7 @@ import matplotlib
 
 matplotlib.use("Agg")  # rendu sans écran pour les graphiques
 import matplotlib.pyplot as plt
+import mlflow
 
 # ── Import du moteur snake ────────────────────────────────────────────────────
 # On réutilise game_loop et les constantes définies dans snake.py
@@ -354,15 +355,18 @@ def plot_results(
     # ── 1. Scores oracle ──────────────────────────────────────────────────
     ax = axes[0]
     window = 20
-    smoothed = np.convolve(oracle_scores, np.ones(window) / window, mode="valid")
-    ax.plot(oracle_scores, alpha=0.3, color="steelblue", label="Brut")
-    ax.plot(
-        range(window - 1, len(oracle_scores)),
-        smoothed,
-        color="steelblue",
-        linewidth=2,
-        label=f"Moyenne {window}",
-    )
+    if len(oracle_scores) >= window:
+        smoothed = np.convolve(oracle_scores, np.ones(window) / window, mode="valid")
+        ax.plot(oracle_scores, alpha=0.3, color="steelblue", label="Brut")
+        ax.plot(
+            range(window - 1, len(oracle_scores)),
+            smoothed,
+            color="steelblue",
+            linewidth=2,
+            label=f"Moyenne {window}",
+        )
+    else:
+        ax.plot(oracle_scores, color="steelblue", linewidth=2, label="Brut")
     ax.set_title("Phase 1 — Scores Oracle")
     ax.set_xlabel("Partie")
     ax.set_ylabel("Score")
@@ -414,7 +418,7 @@ def plot_results(
 
 
 def train_pipeline():
-    """Lance le pipeline complet d'entraînement."""
+    """Lance le pipeline complet d'entraînement avec MLflow tracking."""
     print("\n" + "█" * 60)
     print("  SNAKE — Agent Arbre de Décision (XGBoost + CUDA)")
     print("█" * 60)
@@ -425,46 +429,150 @@ def train_pipeline():
     # Chargement si un modèle existe déjà
     agent.load()
 
-    total_start = time.time()
+    # ── MLflow setup ──────────────────────────────────────────────────────
+    mlflow.set_experiment("snake-decision-tree")
 
-    # ── Phase 1 : collecte oracle ─────────────────────────────────────────
-    if len(agent.buffer) < MIN_BUFFER_FOR_TRAIN:
-        oracle_scores = phase_oracle(agent, n_games=N_ORACLE_GAMES)
-    else:
-        print(
-            f"\n[Skip] Buffer déjà riche ({len(agent.buffer)} exemples). "
-            "Phase oracle ignorée."
+    with mlflow.start_run(run_name="xgboost-dagger-full-pipeline"):
+
+        # Log tous les hyperparamètres
+        mlflow.log_params({
+            # Phase 1
+            "N_ORACLE_GAMES": N_ORACLE_GAMES,
+            "ORACLE_MAX_STEPS": ORACLE_MAX_STEPS,
+            # Phase 2
+            "MIN_BUFFER_FOR_TRAIN": MIN_BUFFER_FOR_TRAIN,
+            # Phase 3
+            "N_DAGGER_ROUNDS": N_DAGGER_ROUNDS,
+            "N_GAMES_PER_ROUND": N_GAMES_PER_ROUND,
+            "DAGGER_BETA_INIT": DAGGER_BETA_INIT,
+            "DAGGER_BETA_DECAY": DAGGER_BETA_DECAY,
+            "RETRAIN_EVERY": RETRAIN_EVERY,
+            # Phase 4
+            "N_EVAL_GAMES": N_EVAL_GAMES,
+            # Général
+            "RANDOM_SEED": RANDOM_SEED,
+            # XGBoost
+            "xgb_n_estimators": 400,
+            "xgb_max_depth": 8,
+            "xgb_learning_rate": 0.05,
+            "xgb_subsample": 0.85,
+            "xgb_colsample_bytree": 0.85,
+            "xgb_min_child_weight": 3,
+            "xgb_gamma": 0.1,
+            "xgb_reg_alpha": 0.05,
+            "xgb_reg_lambda": 1.5,
+            "xgb_tree_method": "hist",
+            # Environnement
+            "backend": "XGBoost CUDA" if agent.use_cuda else "Sklearn CPU",
+        })
+
+        # Log versions des librairies
+        import xgboost as xgb_mod
+        import sklearn
+        mlflow.log_params({
+            "python_version": sys.version.split()[0],
+            "xgboost_version": xgb_mod.__version__,
+            "sklearn_version": sklearn.__version__,
+            "numpy_version": np.__version__,
+            "mlflow_version": mlflow.__version__,
+        })
+
+        total_start = time.time()
+
+        # ── Phase 1 : collecte oracle ─────────────────────────────────────
+        t_phase1 = time.time()
+        if len(agent.buffer) < MIN_BUFFER_FOR_TRAIN:
+            oracle_scores = phase_oracle(agent, n_games=N_ORACLE_GAMES)
+        else:
+            print(
+                f"\n[Skip] Buffer déjà riche ({len(agent.buffer)} exemples). "
+                "Phase oracle ignorée."
+            )
+            oracle_scores = [0]
+        phase1_time = time.time() - t_phase1
+
+        mlflow.log_metrics({
+            "phase1_oracle_mean_score": float(np.mean(oracle_scores)),
+            "phase1_oracle_std_score": float(np.std(oracle_scores)),
+            "phase1_oracle_max_score": float(np.max(oracle_scores)),
+            "phase1_buffer_size": len(agent.buffer),
+            "phase1_time_s": phase1_time,
+        })
+
+        # ── Phase 2 : entraînement initial ────────────────────────────────
+        t_phase2 = time.time()
+        if not agent.trained:
+            phase_train(agent)
+            agent.save()  # sauvegarde intermédiaire après Phase 2
+        else:
+            print("\n[Skip] Modèle déjà entraîné. Passe directement au DAgger.")
+        phase2_time = time.time() - t_phase2
+
+        if agent.train_history:
+            last = agent.train_history[-1]
+            mlflow.log_metrics({
+                "phase2_train_error_rate": last["error_rate"],
+                "phase2_train_accuracy": 1 - last["error_rate"],
+                "phase2_train_samples": last["n_samples"],
+            })
+        mlflow.log_metric("phase2_time_s", phase2_time)
+
+        # ── Phase 3 : DAgger ──────────────────────────────────────────────
+        t_phase3 = time.time()
+        dagger_history = phase_dagger(
+            agent,
+            n_rounds=N_DAGGER_ROUNDS,
+            n_games=N_GAMES_PER_ROUND,
+            beta_init=DAGGER_BETA_INIT,
         )
-        oracle_scores = [0]
+        phase3_time = time.time() - t_phase3
 
-    # ── Phase 2 : entraînement initial ───────────────────────────────────
-    if not agent.trained:
-        phase_train(agent)
-        agent.save()  # sauvegarde intermédiaire après Phase 2
-    else:
-        print("\n[Skip] Modèle déjà entraîné. Passe directement au DAgger.")
+        # Log DAgger metrics par round
+        for rnd, score in dagger_history["scores"].items():
+            mlflow.log_metric("dagger_mean_score", score, step=rnd)
+        for rnd, error in dagger_history["errors"].items():
+            mlflow.log_metric("dagger_cv3_error", error, step=rnd)
+            mlflow.log_metric("dagger_cv3_accuracy", 1 - error, step=rnd)
 
-    # ── Phase 3 : DAgger ─────────────────────────────────────────────────
-    dagger_history = phase_dagger(
-        agent,
-        n_rounds=N_DAGGER_ROUNDS,
-        n_games=N_GAMES_PER_ROUND,
-        beta_init=DAGGER_BETA_INIT,
-    )
+        mlflow.log_metrics({
+            "phase3_buffer_size": len(agent.buffer),
+            "phase3_time_s": phase3_time,
+        })
 
-    # ── Phase 4 : évaluation ─────────────────────────────────────────────
-    eval_results = phase_eval(agent, n_games=N_EVAL_GAMES)
+        # ── Phase 4 : évaluation ──────────────────────────────────────────
+        t_phase4 = time.time()
+        eval_results = phase_eval(agent, n_games=N_EVAL_GAMES)
+        phase4_time = time.time() - t_phase4
 
-    # ── Sauvegarde ───────────────────────────────────────────────────────
-    agent.save()
+        mlflow.log_metrics({
+            "eval_mean_score": eval_results["mean"],
+            "eval_std_score": eval_results["std"],
+            "eval_max_score": eval_results["max"],
+            "eval_median_score": eval_results["median"],
+            "phase4_time_s": phase4_time,
+        })
 
-    # ── Visualisation ────────────────────────────────────────────────────
-    if SAVE_PLOTS:
-        plot_results(oracle_scores, dagger_history, eval_results)
+        # ── Sauvegarde ────────────────────────────────────────────────────
+        agent.save()
 
-    total_time = time.time() - total_start
-    print(f"\n[Done] Temps total d'entraînement : {total_time:.1f}s")
-    print(f"[Done] Score final moyen : {eval_results['mean']:.2f}")
+        # ── Visualisation ─────────────────────────────────────────────────
+        if SAVE_PLOTS:
+            plot_results(oracle_scores, dagger_history, eval_results)
+
+        total_time = time.time() - total_start
+
+        mlflow.log_metric("total_time_s", total_time)
+
+        # Log artifacts
+        if os.path.exists("snake_xgb_model.pkl"):
+            mlflow.log_artifact("snake_xgb_model.pkl")
+        if os.path.exists("snake_training_curves.png"):
+            mlflow.log_artifact("snake_training_curves.png")
+
+        print(f"\n[Done] Temps total d'entraînement : {total_time:.1f}s")
+        print(f"[Done] Score final moyen : {eval_results['mean']:.2f}")
+        print(f"[MLflow] Run ID : {mlflow.active_run().info.run_id}")
+
     return agent, eval_results
 
 
