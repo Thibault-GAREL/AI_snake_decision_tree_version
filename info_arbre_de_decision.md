@@ -1,5 +1,11 @@
 # 📊 Snake Decision Tree — Training Info
 
+## 🔍 Résumé XAI — Interprétabilité du modèle
+
+L'analyse XAI révèle que le modèle XGBoost appris par imitation (DAgger) est **fortement interprétable et cohérent** : les features de danger directionnel (N/S/E/W) dominent l'ensemble des métriques d'importance — native (Gain, Weight, Cover), par permutation (chute de score ~40 pts quand brouillées) et SHAP (valeurs absolues les plus élevées sur toutes les actions). Les features food delta jouent un rôle secondaire mais structuré, avec une corrélation de Pearson directionnelle claire avec chaque action (UP/RIGHT/DOWN/LEFT). Les projections t-SNE et UMAP montrent une structure latente cohérente : les états de jeu se regroupent naturellement par situation (danger vs food alignée vs neutre), et certaines features sont hautement spécialisées selon le contexte. L'analyse SHAP par waterfall décompose chaque décision individuelle en contributions signées, confirmant que l'agent évite le danger en priorité absolue et se dirige vers la nourriture uniquement en l'absence de menace immédiate. La carte de confiance (prob-gap) révèle que l'agent est quasi-certain en bord de grille et plus hésitant au centre, là où les choix sont réellement ambigus.
+
+---
+
 ## 🏗️ Model Architecture
 
 This is not a neural network — the equivalent of "neurons" here are **decision nodes** inside boosted trees.
