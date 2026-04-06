@@ -25,11 +25,15 @@ This project is a **continuation** of my Snake AI series :
 
 This time, the agent learns to play Snake using **Imitation Learning** with **XGBoost** (boosted decision trees) and GPU/CUDA acceleration. Instead of reinforcement learning, the agent is first trained on demonstrations from a **greedy heuristic oracle**, then refined through **DAgger** (Dataset Aggregation) — mixing oracle and agent actions to iteratively correct distribution shift. 🌳🎯
 
+The **oracle** is not a learned model — it is a hand-crafted algorithm with **perfect, instantaneous knowledge** of the game state. At every step, it computes the locally optimal move: always heading toward the food while avoiding walls and its own body. It never learns, never hesitates, and never makes mistakes by ignorance. Think of it as a **"God mode"** player — it sees everything and always knows the right answer.
+
+**DAgger** solves a fundamental weakness of pure imitation learning : **distribution shift**. If the XGBoost model is only trained on oracle demonstrations, it learns to behave well in situations *the oracle encountered* — but the moment the trained agent starts playing on its own, it drifts into states the oracle never visited, and has no guidance. DAgger fixes this by letting the agent play partially autonomously, then asking the oracle *"what would you have done here?"* and adding those corrections to the training buffer. Over successive rounds, the agent covers more and more of its own failure states, making it progressively more robust.
+
 The project also includes a full **Explainable AI (XAI)** suite to understand what the boosted tree ensemble has learned, with dedicated scripts mirroring the analysis done on the DQL version.
 
 ---
 
-## ⚙️ Features
+## 🚀 Features
 
   🌳 **XGBoost** boosted decision trees with GPU/CUDA acceleration (`tree_method='hist'`)
 
@@ -51,43 +55,23 @@ The project also includes a full **Explainable AI (XAI)** suite to understand wh
 
   🎮 The AI controls a snake on a 10×14 grid. At each step, it receives a **state vector of 26 features** and predicts one of 4 actions (UP, RIGHT, DOWN, LEFT).
 
-  🤖 **Phase 1 — Oracle** : a greedy heuristic agent plays 500 games and fills the replay buffer with (state, action) pairs.
+  🤖 **Phase 1 — Oracle** : the greedy oracle plays 500 games in "God mode" — it has full knowledge of the grid, always moves toward food, always avoids collisions. It fills the replay buffer with 300k (state, action) pairs that serve as ground-truth demonstrations.
 
-  🧾 **Phase 2 — Initial training** : XGBoost is trained on the full buffer using multi-class softmax. A 10% validation split with early stopping controls overfitting.
+  🧾 **Phase 2 — Initial training** : XGBoost is trained on the full oracle buffer using multi-class softmax. A 10% validation split with early stopping controls overfitting. At this stage the model can imitate the oracle, but only in situations the oracle encountered.
 
-  🔁 **Phase 3 — DAgger** : 8 rounds of mixed-play. The agent plays with probability `1-beta` and the oracle with probability `beta`. Only oracle labels are stored. Beta decays from 0.8 × 0.85^round, keeping 5% oracle minimum.
+  🔁 **Phase 3 — DAgger** : 8 rounds of mixed-play to fix distribution shift. Each round, the agent plays autonomously with probability `1-beta` (exploring its own states) while the oracle plays with probability `beta`. Whenever the agent plays, the oracle silently labels every state with the correct action — only these oracle labels are stored. XGBoost is retrained on the growing buffer. Beta decays from 0.8 × 0.85^round (heavily oracle-guided at first) down to a 5% minimum (nearly autonomous). The agent progressively covers its own failure states, making it robust beyond pure imitation.
 
   📈 **Phase 4 — Evaluation** : pure agent-play over 100 games, no oracle. Final score distribution and mean/max reported.
 
 ---
 
-## 🆚 Comparison — 4 Snake AI approaches
+## 🗺️ Model Architecture
 
-This project is part of a series of **4 Snake AI implementations** using different AI paradigms on the same game :
-
-| Aspect | 🧬 [NEAT](https://github.com/Thibault-GAREL/AI_snake_genetic_version) | 🌳 [Decision Tree](https://github.com/Thibault-GAREL/AI_snake_decision_tree_version) ★ | 🤖 [DQL (DQN)](https://github.com/Thibault-GAREL/AI_snake_DQN_version) | 🎯 [PPO](https://github.com/Thibault-GAREL/AI_snake_PPO_version) |
-| --- | --- | --- | --- | --- |
-| **Paradigm** | Evolutionary | Imitation Learning | Reinforcement Learning | Reinforcement Learning |
-| **Algorithm type** | Neuroevolution | Supervised (XGBoost + DAgger) | Off-policy (Q-learning) | On-policy (Actor-Critic) |
-| **Architecture** | 16 → ~28 hidden (final, evolved) → 4 | 26 → 1 600 trees (400×4) → 4 | 28 → 256 → 256 → 128 → 4 | 28 → 256 → 256 → {128→4 (π), 128→1 (V)} |
-| **Model complexity** | ~200–500 params (evolves) | ~80k–200k decision nodes | ~140k params | ~145k params |
-| **Exploration** | Genetic mutations + speciation | DAgger oracle (β : 0.8 → 0.05) | ε-greedy (1.0 → 0.01) | Entropy bonus (coef 0.05) |
-| **Memory / Buffer** | Population (100 genomes) | Supervised buffer (300 000) | Experience Replay (100 000) | Rollout buffer (2 048 steps) |
-| **Batch** | — (full population eval.) | Full dataset per round | 128 | 64 |
-| **Training time** | **~15 h** | **~12 min (GPU)** | **~2.5 h (GPU)** | **~3 h (GPU)** |
-| **Max score** | **> 20** | **43** | **45** | **64** |
-| **Mean score** | **10** | **22.77** | **22.60** | **38.67** |
-| **GPU support** | ❌ | ✅ | ✅ | ✅ |
-| **Sample efficiency** | 🔴 Low | 🟢 High | 🟡 Medium | 🔴 Low |
-| **Generalization** | 🟡 Medium | 🔴 Low | 🟡 Medium | 🟢 High |
-| **Intrinsic interpretability** | 🟡 Low | 🟡 Medium (ensemble = grey box) | 🔴 Black box | 🔴 Black box |
-
-> ★ = current repository
-> Each project includes an XAI suite of 4 analysis scripts.
-
----
-
-## 🗺️ State vector — 26 input features
+```
+Input (26)  →  XGBoost (400 estimators × 4 classes = 1 600 trees)
+            →  Argmax
+            →  Action (4)
+```
 
 <details>
 <summary>📋 See all 26 features</summary>
@@ -143,6 +127,46 @@ This project is part of a series of **4 Snake AI implementations** using differe
 | 3 | `LEFT` |
 
 </details>
+
+---
+
+## ⚙️ Key Hyperparameters
+
+| Parameter | Value | Description |
+|-----------|-------|-------------|
+| `N_ORACLE_GAMES` | 500 | Games played by the greedy oracle |
+| `N_DAGGER_ROUNDS` | 8 | DAgger refinement rounds |
+| `DAGGER_BETA_INIT` | 0.8 | Initial oracle mixing ratio |
+| `DAGGER_BETA_DECAY` | 0.85 | Beta decay per round |
+| `n_estimators` | 400 | XGBoost boosting rounds |
+| `max_depth` | 8 | Max depth per tree |
+| `learning_rate` | 0.05 | XGBoost eta |
+
+---
+
+## 🆚 Comparison — 4 Snake AI approaches
+
+This project is part of a series of **4 Snake AI implementations** using different AI paradigms on the same game :
+
+| Aspect | 🧬 [NEAT](https://github.com/Thibault-GAREL/AI_snake_genetic_version) | 🌳 [Decision Tree](https://github.com/Thibault-GAREL/AI_snake_decision_tree_version) ★ | 🤖 [DQL (DQN)](https://github.com/Thibault-GAREL/AI_snake_DQN_version) | 🎯 [PPO](https://github.com/Thibault-GAREL/AI_snake_PPO_version) |
+| --- | --- | --- | --- | --- |
+| **Paradigm** | Evolutionary | Imitation Learning | Reinforcement Learning | Reinforcement Learning |
+| **Algorithm type** | Neuroevolution | Supervised (XGBoost + DAgger) | Off-policy (Q-learning) | On-policy (Actor-Critic) |
+| **Architecture** | 16 → ~28 hidden (final, evolved) → 4 | 26 → 1 600 trees (400×4) → 4 | 28 → 256 → 256 → 128 → 4 | 28 → 256 → 256 → {128→4 (π), 128→1 (V)} |
+| **Model complexity** | ~200–500 params (evolves) | ~80k–200k decision nodes | ~140k params | ~145k params |
+| **Exploration** | Genetic mutations + speciation | DAgger oracle (β : 0.8 → 0.05) | ε-greedy (1.0 → 0.01) | Entropy bonus (coef 0.05) |
+| **Memory / Buffer** | Population (100 genomes) | Supervised buffer (300 000) | Experience Replay (100 000) | Rollout buffer (2 048 steps) |
+| **Batch** | — (full population eval.) | Full dataset per round | 128 | 64 |
+| **Training time** | **~15 h** | **~12 min (GPU)** | **~2.5 h (GPU)** | **~3 h (GPU)** |
+| **Max score** | **> 20** | **43** | **45** | **64** |
+| **Mean score** | **10** | **22.77** | **22.60** | **38.67** |
+| **GPU support** | ❌ | ✅ | ✅ | ✅ |
+| **Sample efficiency** | 🔴 Low | 🟢 High | 🟡 Medium | 🔴 Low |
+| **Generalization** | 🟡 Medium | 🔴 Low | 🟡 Medium | 🟢 High |
+| **Intrinsic interpretability** | 🟡 Low | 🟡 Medium (ensemble = grey box) | 🔴 Black box | 🔴 Black box |
+
+> ★ = current repository
+> Each project includes an XAI suite of 4 analysis scripts.
 
 ---
 
@@ -297,20 +321,6 @@ python xai_dt_internals.py --umap         # UMAP projection
 python xai_dt_shap.py                     # all SHAP plots
 python xai_dt_shap.py --beeswarm          # SHAP beeswarm only
 ```
-
----
-
-## ⚙️ Key Hyperparameters
-
-| Parameter | Value | Description |
-|-----------|-------|-------------|
-| `N_ORACLE_GAMES` | 500 | Games played by the greedy oracle |
-| `N_DAGGER_ROUNDS` | 8 | DAgger refinement rounds |
-| `DAGGER_BETA_INIT` | 0.8 | Initial oracle mixing ratio |
-| `DAGGER_BETA_DECAY` | 0.85 | Beta decay per round |
-| `n_estimators` | 400 | XGBoost boosting rounds |
-| `max_depth` | 8 | Max depth per tree |
-| `learning_rate` | 0.05 | XGBoost eta |
 
 ---
 
