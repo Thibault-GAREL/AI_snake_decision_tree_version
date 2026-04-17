@@ -29,7 +29,46 @@ The **oracle** is not a learned model — it is a hand-crafted algorithm with **
 
 **DAgger** solves a fundamental weakness of pure imitation learning : **distribution shift**. If the XGBoost model is only trained on oracle demonstrations, it learns to behave well in situations *the oracle encountered* — but the moment the trained agent starts playing on its own, it drifts into states the oracle never visited, and has no guidance. DAgger fixes this by letting the agent play partially autonomously, then asking the oracle *"what would you have done here?"* and adding those corrections to the training buffer. Over successive rounds, the agent covers more and more of its own failure states, making it progressively more robust.
 
-The project also includes a full **Explainable AI (XAI)** suite to understand what the boosted tree ensemble has learned, with dedicated scripts mirroring the analysis done on the DQL version.
+The project also includes a full **Explainable AI (XAI)** suite to understand what the boosted tree ensemble has learned, with dedicated scripts mirroring the analysis done across all 4 Snake AI experiments.
+
+---
+
+## 🔬 Research Question
+
+> **How do we extract complex reasoning from a neural network?**
+
+Neural networks are often described as **black boxes**: their internal decision logic remains opaque despite producing relevant results. This project goes beyond training a performant agent — it applies **Explainable AI (XAI)** techniques to understand *why* the model makes the decisions it does.
+
+The XGBoost Decision Tree is a unique case study: in theory a **white box** (a model whose logic is entirely human-readable, like a flowchart of if/then rules), it becomes a practical **grey box** once boosting produces tens of thousands of decision nodes. This tension between theoretical transparency and practical opacity is the central XAI question of this experiment.
+
+---
+
+## 🎯 Context & Motivation
+
+The deeper motivation behind this project series is the **alignment problem** — one of the most important open challenges in AI. It refers to the difficulty of ensuring that AI systems act in accordance with human intentions, not just formal instructions.
+
+Concrete failures: an agent tasked with "maximizing cleanliness" might throw away useful objects (emergent objectives), hide dirt under a rug (reward hacking), or block humans from entering to prevent re-dirtying. The agent does exactly what it was told — not what was intended.
+
+This gap is hard to diagnose when you can't see inside the model. One key obstacle is the **black box problem**: deep neural networks make decisions through immense parameter spaces whose internal logic is effectively unreadable to humans. **Explainable AI (XAI)** is one answer — making AI reasoning transparent and interpretable.
+
+This project uses Snake as the visual, intuitive testbed. The Decision Tree approach is particularly interesting for XAI: it was *designed* to be interpretable by construction, yet it reveals a fundamental paradox about the nature of transparency at scale.
+
+---
+
+## 🟩 Interpretability Spectrum
+
+A key conceptual framework underlying the whole project series:
+
+| Box type | Definition | Example |
+| -------- | ---------- | ------- |
+| ⬜ White box | Fully readable logic — policy extractable directly | Q-table (tabular Q-learning) |
+| 🟨 Grey box | Transparent structure, unreadable complexity | **XGBoost (this project) — 80k–200k nodes** |
+| ⬛ Black box | Opaque internals despite good performance | DQL, PPO |
+| 🟩 NEAT | Small enough for manual inspection + XAI | NEAT (16 inputs, evolved topology) |
+
+The **white box / grey box paradox** is the central finding of this experiment: an XGBoost model is theoretically a white box — decision trees are just if/then rules, readable by any human. But once boosting produces **80,000 to 200,000 decision nodes** across 1,600 trees, it exceeds human reading capacity entirely. The structure remains transparent; the complexity makes it unreadable in practice.
+
+This makes XAI tools not just useful but *necessary* — even for a model designed to be interpretable.
 
 ---
 
@@ -171,7 +210,7 @@ This project is part of a series of **4 Snake AI implementations** using differe
 <details>
 <summary>📅 Development timeline — Gantt chart</summary>
 
-![Gantt](Images/gantt_mineur.png)
+![Gantt](img/gantt_mineur.png)
 
 </details>
 
@@ -179,7 +218,7 @@ This project is part of a series of **4 Snake AI implementations** using differe
 
 ## 🔬 Explainable AI (XAI) Suite
 
-Four dedicated scripts analyze the model, mirroring the XAI suite from the DQL version :
+Four dedicated scripts analyze the model, mirroring the XAI suite from the other Snake AI versions :
 
 | Script | Analysis | Output |
 |--------|----------|--------|
@@ -187,6 +226,14 @@ Four dedicated scripts analyze the model, mirroring the XAI suite from the DQL v
 | `xai_dt_features.py` | Permutation importance, native XGBoost importance, feature-action correlation | `xai_dt_features/` |
 | `xai_dt_internals.py` | Importance distributions, tree specialization, t-SNE / UMAP | `xai_dt_internals/` |
 | `xai_dt_shap.py` | SHAP TreeExplainer — beeswarm, waterfall, force plots, summary heatmap | `xai_dt_shap/` |
+
+**Key findings from XAI analysis (baseline score: 22.9 apples) :**
+
+- 🏆 **ΔFood Y** is the dominant feature — score drop of −22.4 on removal, it drives decisions more than absolute food position
+- ⚠️ **Danger E and Danger W** are second and third (−16.8 and −16.15) — unlike NEAT, binary danger signals play a central role
+- 🔄 **Feature engineering enriched the policy** : adding `danger_*`, `food_delta_*` and `dir_*` directly led to a more reactive, contextual strategy — NEAT had none of these
+- 🔁 **More adaptive than NEAT** : the snake changes direction much more frequently, probabilities oscillate rapidly between actions based on immediate context rather than following a fixed circular pattern
+- 🟨 **Grey box confirmed** : 80k–200k nodes — XGBoost native metrics (Gain, Weight, Cover) are the only practical way to understand the model's internal structure
 
 <details>
 <summary>📸 Predictions analysis — xai_dt_predictions.py</summary>
@@ -209,6 +256,8 @@ Shows **what the model "thinks"** at each cell of the grid. The probability heat
 
 Answers the question : **which features actually matter?** Permutation importance measures the score drop when each feature is shuffled. Native XGBoost importance (gain / weight / cover) reveals which features are most used at split time. The correlation heatmap and sensory profiles show which feature tends to trigger which action.
 
+Key finding : **ΔFood Y dominates**, followed by binary danger signals East and West. The feature engineering (danger, delta food, direction) directly shapes a richer strategy than NEAT's food-distance-only inputs.
+
 #### Permutation importance
 ![xai_dt_permutation](xai_dt_features/xai_dt_permutation.png)
 
@@ -226,7 +275,7 @@ Answers the question : **which features actually matter?** Permutation importanc
 <details>
 <summary>📸 Tree internals — xai_dt_internals.py</summary>
 
-Looks inside the ensemble itself. The importance distributions expose **dead features** (never used in any split — analogue of dead neurons). The specialization plot identifies which features drive decisions in specific game situations (danger, food aligned…). The t-SNE and UMAP projections map the 26-dimensional game states into 2D to reveal clusters of similar situations and how the model separates them.
+Looks inside the ensemble itself. The importance distributions expose **dead features** (never used in any split — analogue of dead neurons). The specialization plot identifies which features drive decisions in specific game situations (danger, food aligned…). The t-SNE and UMAP projections map the 26-dimensional game states into 2D to reveal clusters of similar situations — more structured than NEAT, coherent with a more nuanced policy.
 
 #### Importance distributions (dead features)
 ![xai_dt_importance](xai_dt_internals/xai_dt_importance.png)
@@ -260,6 +309,48 @@ Uses **SHAP TreeExplainer** (native to XGBoost — much faster than DeepExplaine
 
 ---
 
+## 💡 Key Insights
+
+**The white box / grey box paradox**
+XGBoost was chosen precisely because it is interpretable — but 80k–200k nodes make it a practical grey box. Where NEAT allowed direct graph reading, the XGBoost ensemble requires XAI tools just to understand what should have been straightforward. **Interpretability is not just about architecture; it depends on whether a human can actually process the complexity.**
+
+**Feature engineering directly shapes the learned strategy**
+Adding `danger_*`, `food_delta_*` and `dir_*` to the 16 NEAT inputs (26 total) changed the strategy qualitatively — not just quantitatively:
+
+- NEAT's strategy: food-first, circular movement, fixed pattern
+- DT's strategy: danger-reactive, directionally aware, adapts based on game context and snake length
+
+The features you give a model fundamentally define what it can learn.
+
+**DAgger solves distribution shift**
+Pure imitation from oracle demonstrations fails: the trained model drifts into states the oracle never visited. DAgger's insight — let the agent explore, then ask the oracle "what would you have done here?" — progressively covers failure states and produces a robust policy in just ~12 minutes of GPU training.
+
+**XAI is closer to data science than AI**
+The analysis tools (SHAP, permutation importance, native XGBoost metrics) are essentially structured information extraction and visualization — not algorithms trained to understand networks. The work of an XAI practitioner here looks more like a data scientist making insights accessible than an ML researcher training models.
+
+### Learned strategy comparison across the 4 experiments
+
+| Agent | Strategy type | Most influential feature |
+| ----- | ------------- | ------------------------ |
+| NEAT | Circular, food-chasing, fixed | `food_N` (food distance North) |
+| **Decision Tree** | Reactive, danger-aware, adaptive | `ΔFood Y` + `Danger E/W` |
+| DQL | Size-aware, body-anticipating | `Length` + `ΔFood X/Y` |
+| PPO | Symmetric risk, end-game anticipation | `Danger binary` (all directions) |
+
+---
+
+## 🔭 Perspectives
+
+  🗺️ **Saliency Maps** — the natural next step: apply XAI to image recognition models, highlighting the exact pixels that triggered a decision (e.g., a cat's ears to classify it as a cat).
+
+  🤖 **Automated XAI** — move from human-driven data science analysis to an AI that automatically analyzes any model and produces a readable strategy summary. Current tools are fast but shallow; an intelligent XAI system could reveal complex multi-feature interactions that no human would manually uncover.
+
+  🗄️ **Neural network analysis database** — build a dataset of diverse trained agents, then train an AI to generalize: input a model, output its strategy in human-readable form.
+
+  🔧 **Optimization via XAI** — dead features identified from importance scores could directly guide model pruning: fewer trees, same performance, lower compute cost and ecological footprint.
+
+---
+
 ## 📂 Repository structure
 
 ```bash
@@ -284,6 +375,7 @@ Uses **SHAP TreeExplainer** (native to XGBoost — much faster than DeepExplaine
 ├── xai_dt_internals/               # Output plots — Tree internals
 ├── xai_dt_shap/                    # Output plots + HTML — SHAP
 │
+├── Rapport MPP - Thibault GAREL - 2026-04-13.pdf   # Full analysis report
 ├── LICENSE
 └── README.md
 ```
@@ -331,8 +423,22 @@ python xai_dt_shap.py --beeswarm          # SHAP beeswarm only
 
 ---
 
-## 📖 Inspiration / Sources
+## 📑 Full Report
 
-I code it without any help 😆 !
+A detailed report accompanies this project series, covering the full analysis : training methodology, manual interpretability, XAI results, and comparison across all 4 Snake AI approaches (NEAT, Decision Tree, DQL, PPO).
+
+📥 [Download the report (PDF)](Rapport%20MPP%20-%20Thibault%20GAREL%20-%202026-04-13.pdf)
+
+---
+
+## 📖 Sources & Research Papers
+
+- **NEAT algorithm** — [*Evolving Neural Networks through Augmenting Topologies*](http://nn.cs.utexas.edu/downloads/papers/stanley.ec02.pdf), Stanley & Miikkulainen (2002)
+- **XGBoost** — [*A Scalable Tree Boosting System*](https://arxiv.org/abs/1603.02754), Tianqi Chen (2016)
+- **DAgger** — [*A Reduction of Imitation Learning and Structured Prediction to No-Regret Online Learning*](https://arxiv.org/abs/1011.0686), Ross et al. (2011)
+- **Deep Q-Learning** — [*A Theoretical Analysis of Deep Q-Learning*](https://arxiv.org/abs/1901.00137), Zhuoran Yang (2019)
+- **PPO** — [*Proximal Policy Optimization Algorithms*](https://arxiv.org/abs/1707.06347), John Schulman (2017)
+- **XAI Survey** — [*Explainable AI: A Survey of Needs, Techniques, Applications, and Future Direction*](https://arxiv.org/abs/2409.00265), Mersha et al. (2024)
+- *L'Intelligence Artificielle pour les développeurs* — Virginie Mathivet (2014)
 
 Code created by me 😎, Thibault GAREL — [Github](https://github.com/Thibault-GAREL)
