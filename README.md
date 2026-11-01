@@ -72,45 +72,19 @@ This makes XAI tools not just useful but *necessary* — even for a model design
 
 ---
 
-## 🚀 Features
-
-  🌳 **XGBoost** boosted decision trees with GPU/CUDA acceleration (`tree_method='hist'`)
-
-  🧠 **Greedy oracle** bootstraps the dataset — no random exploration needed
-
-  🔁 **DAgger-light** iterative refinement — beta-weighted mixing of oracle and agent actions
-
-  📦 **Replay buffer** of up to 300k (state, action) pairs for supervised training
-
-  🛡️ **sklearn fallback** — automatic switch to `GradientBoostingClassifier` if no GPU available
-
-  💾 **Auto-save** of model and buffer after each training phase
-
-  🔬 **Full XAI suite** — 4 independent analysis scripts
-
----
-
-## ⚙️ How it works
-
-  🎮 The AI controls a snake on a 10×14 grid. At each step, it receives a **state vector of 26 features** and predicts one of 4 actions (UP, RIGHT, DOWN, LEFT).
-
-  🤖 **Phase 1 — Oracle** : the greedy oracle plays 500 games in "God mode" — it has full knowledge of the grid, always moves toward food, always avoids collisions. It fills the replay buffer with 300k (state, action) pairs that serve as ground-truth demonstrations.
-
-  🧾 **Phase 2 — Initial training** : XGBoost is trained on the full oracle buffer using multi-class softmax. A 10% validation split with early stopping controls overfitting. At this stage the model can imitate the oracle, but only in situations the oracle encountered.
-
-  🔁 **Phase 3 — DAgger** : 8 rounds of mixed-play to fix distribution shift. Each round, the agent plays autonomously with probability `1-beta` (exploring its own states) while the oracle plays with probability `beta`. Whenever the agent plays, the oracle silently labels every state with the correct action — only these oracle labels are stored. XGBoost is retrained on the growing buffer. Beta decays from 0.8 × 0.85^round (heavily oracle-guided at first) down to a 5% minimum (nearly autonomous). The agent progressively covers its own failure states, making it robust beyond pure imitation.
-
-  📈 **Phase 4 — Evaluation** : pure agent-play over 100 games, no oracle. Final score distribution and mean/max reported.
-
----
-
-## 🗺️ Model Architecture
+## 🗺️ How it works
 
 ```
 Input (26)  →  XGBoost (400 estimators × 4 classes = 1 600 trees)
             →  Argmax
             →  Action (4)
 ```
+
+- The AI controls a snake on a 10×14 grid. At each step, it receives a **state vector of 26 features** and predicts one of 4 actions (UP, RIGHT, DOWN, LEFT).
+- **Phase 1: Oracle** : the greedy oracle plays 500 games in "God mode", it has full knowledge of the grid, always moves toward food, always avoids collisions. It fills the replay buffer with 300k (state, action) pairs that serve as ground-truth demonstrations.
+- **Phase 2: Initial training** : XGBoost is trained on the full oracle buffer using multi-class softmax. A 10% validation split with early stopping controls overfitting. At this stage the model can imitate the oracle, but only in situations the oracle encountered.
+- **Phase 3: DAgger** : 8 rounds of mixed-play to fix distribution shift. Each round, the agent plays autonomously with probability `1-beta` (exploring its own states) while the oracle plays with probability `beta`. Whenever the agent plays, the oracle silently labels every state with the correct action, only these oracle labels are stored. XGBoost is retrained on the growing buffer. Beta decays from 0.8 × 0.85^round (heavily oracle-guided at first) down to a 5% minimum (nearly autonomous). The agent progressively covers its own failure states, making it robust beyond pure imitation.
+- **Phase 4: Evaluation** : pure agent-play over 100 games, no oracle. Final score distribution and mean/max reported.
 
 <details>
 <summary>📋 See all 26 features</summary>
